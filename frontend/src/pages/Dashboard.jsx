@@ -28,16 +28,13 @@ export default function Dashboard() {
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [msgInput, setMsgInput] = useState("");
   const [loadingChat, setLoadingChat] = useState(false);
   const [sendingMsg, setSendingMsg] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
-
   const [conversations, setConversations] = useState([]); // recent chats list
 
-  const [typingFromFriend, setTypingFromFriend] = useState(false);
-  const typingTimeoutRef = useRef(null);        // friend typing indicator ke liye
-  const typingEmitTimeoutRef = useRef(null);    // humare typing emit ko debounce karne ke liye
+  // message input ab uncontrolled hai
+  const msgInputRef = useRef(null);
 
   // active view: "home" | "friends" | "chat"
   const [activeTab, setActiveTab] = useState("home");
@@ -95,21 +92,6 @@ export default function Dashboard() {
       loadConversations();
     };
 
-    const handleTyping = (data) => {
-      if (
-        data.conversationId === conversationId &&
-        data.from === selectedFriend?._id
-      ) {
-        setTypingFromFriend(data.isTyping);
-        if (data.isTyping) {
-          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-          typingTimeoutRef.current = setTimeout(() => {
-            setTypingFromFriend(false);
-          }, 1500);
-        }
-      }
-    };
-
     const handleMessagesSeen = (data) => {
       if (
         data.conversationId === conversationId &&
@@ -138,14 +120,12 @@ export default function Dashboard() {
 
     socket.on("online-users", handleOnline);
     socket.on("receive-message", handleReceiveMessage);
-    socket.on("typing", handleTyping);
     socket.on("messages-seen", handleMessagesSeen);
     socket.on("message-deleted", handleMessageDeleted);
 
     return () => {
       socket.off("online-users", handleOnline);
       socket.off("receive-message", handleReceiveMessage);
-      socket.off("typing", handleTyping);
       socket.off("messages-seen", handleMessagesSeen);
       socket.off("message-deleted", handleMessageDeleted);
     };
@@ -196,14 +176,13 @@ export default function Dashboard() {
     }
   };
 
-  // friend se chat open
+  // friend se chat open (Friends tab se) – agar conv nhi hoga to bana dega
   const openChatWithFriend = async (friend, existingConversationId = null) => {
     try {
       setSelectedFriend(friend);
       setLoadingChat(true);
       setMessages([]);
       setConversationId(null);
-      setTypingFromFriend(false);
 
       let convId = existingConversationId;
 
@@ -241,10 +220,13 @@ export default function Dashboard() {
 
   const handleSendMessage = async (e) => {
     e?.preventDefault?.();
-    if (!msgInput.trim() || !conversationId || !selectedFriend) return;
+    if (!conversationId || !selectedFriend || !msgInputRef.current) return;
 
-    const text = msgInput.trim();
-    setMsgInput("");
+    const text = msgInputRef.current.value.trim();
+    if (!text) return;
+
+    // clear input immediately
+    msgInputRef.current.value = "";
     setSendingMsg(true);
 
     try {
@@ -267,54 +249,12 @@ export default function Dashboard() {
           createdAt: savedMessage.createdAt,
           message: savedMessage,
         });
-
-        socket.emit("typing", {
-          conversationId,
-          from: user._id,
-          to: selectedFriend._id,
-          isTyping: false,
-        });
       }
     } catch (err) {
       console.error("Send message error", err);
     } finally {
       setSendingMsg(false);
     }
-  };
-
-  // ✅ debounced typing handler
-  // const handleInputChange = (e) => {
-  //   const value = e.target.value;
-  //   setMsgInput(value);
-
-  //   if (!socket || !selectedFriend || !conversationId) return;
-
-  //   // user started typing -> emit isTyping: true
-  //   socket.emit("typing", {
-  //     conversationId,
-  //     from: user._id,
-  //     to: selectedFriend._id,
-  //     isTyping: true,
-  //   });
-
-  //   // purana timer clear karo
-  //   if (typingEmitTimeoutRef.current) {
-  //     clearTimeout(typingEmitTimeoutRef.current);
-  //   }
-
-  //   // agar 1 sec tak koi key press nahi hua -> isTyping: false
-  //   typingEmitTimeoutRef.current = setTimeout(() => {
-  //     socket.emit("typing", {
-  //       conversationId,
-  //       from: user._id,
-  //       to: selectedFriend._id,
-  //       isTyping: false,
-  //     });
-  //   }, 1000);
-  // };
-  const handleInputChange = (e) => {
-    // sirf local state update – koi socket emit nahi
-    setMsgInput(e.target.value);
   };
 
   const handleDeleteMessage = async (msg, forEveryone = true) => {
@@ -497,8 +437,7 @@ export default function Dashboard() {
 
             {friends.length === 0 ? (
               <p className="text-xs text-slate-500">
-                You don't have any friends yet. Search above and send a
-                request.
+                You don't have any friends yet. Search above and send a request.
               </p>
             ) : (
               <div className="space-y-2 max-h-80 overflow-y-auto">
@@ -506,8 +445,9 @@ export default function Dashboard() {
                   <button
                     key={f._id}
                     onClick={() => openChatWithFriend(f)}
-                    className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${selectedFriend?._id === f._id ? "bg-slate-800" : ""
-                      }`}
+                    className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${
+                      selectedFriend?._id === f._id ? "bg-slate-800" : ""
+                    }`}
                   >
                     <div className="flex items-center gap-2">
                       {f.profilePic ? (
@@ -632,8 +572,9 @@ export default function Dashboard() {
                 <button
                   key={conv._id}
                   onClick={() => openChatWithFriend(partner, conv._id)}
-                  className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${isActive ? "bg-slate-800" : ""
-                    }`}
+                  className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${
+                    isActive ? "bg-slate-800" : ""
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     {partner?.profilePic ? (
@@ -757,10 +698,11 @@ export default function Dashboard() {
                     )}
 
                     <div
-                      className={`px-3 py-2 rounded-2xl text-xs ${isMe
+                      className={`px-3 py-2 rounded-2xl text-xs ${
+                        isMe
                           ? "bg-indigo-600 text-white rounded-br-sm"
                           : "bg-slate-800 text-slate-100 rounded-bl-sm"
-                        }`}
+                      }`}
                     >
                       <div
                         className={
@@ -791,12 +733,6 @@ export default function Dashboard() {
               );
             })
           )}
-
-          {typingFromFriend && selectedFriend && (
-            <div className="px-1 pt-1 text-[11px] text-slate-400">
-              {selectedFriend.name} is typing...
-            </div>
-          )}
         </div>
 
         {/* Message input */}
@@ -809,17 +745,16 @@ export default function Dashboard() {
               +
             </button>
             <input
+              ref={msgInputRef}
               className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder={
                 selectedFriend ? "Type a message..." : "Select a chat first"
               }
-              value={msgInput}
-              onChange={handleInputChange}
-              //disabled={!selectedFriend}
+              disabled={!selectedFriend}
             />
             <button
               type="submit"
-              disabled={!selectedFriend || sendingMsg || !msgInput.trim()}
+              disabled={!selectedFriend || sendingMsg}
               className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-medium disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {sendingMsg ? "Sending..." : "Send"}
@@ -852,19 +787,21 @@ export default function Dashboard() {
         <nav className="flex items-center gap-1 md:gap-2 text-[11px] md:text-xs">
           <button
             onClick={() => setActiveTab("home")}
-            className={`px-3 py-1 rounded-full border ${activeTab === "home"
+            className={`px-3 py-1 rounded-full border ${
+              activeTab === "home"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-              }`}
+            }`}
           >
             Home
           </button>
           <button
             onClick={() => setActiveTab("friends")}
-            className={`px-3 py-1 rounded-full border flex items-center gap-1 ${activeTab === "friends"
+            className={`px-3 py-1 rounded-full border flex items-center gap-1 ${
+              activeTab === "friends"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-              }`}
+            }`}
           >
             Friends
             {friends.length > 0 && (
@@ -875,10 +812,11 @@ export default function Dashboard() {
           </button>
           <button
             onClick={() => setActiveTab("chat")}
-            className={`px-3 py-1 rounded-full border ${activeTab === "chat"
+            className={`px-3 py-1 rounded-full border ${
+              activeTab === "chat"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-              }`}
+            }`}
           >
             Chat
           </button>
