@@ -17,14 +17,19 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// Use environment variables for frontend URLs
-const CLIENT_URLS = [process.env.CLIENT_URL, process.env.PROD_CLIENT_URL];
+// ✅ allowed origins list (dev + prod)
+const allowedOrigins = [
+  process.env.CLIENT_URL,      // http://localhost:5173
+  process.env.PROD_CLIENT_URL, // https://spichat.vercel.app
+].filter(Boolean); // undefined values hata do
 
-// Socket.IO setup (for real-time chat)
+console.log("Allowed origins:", allowedOrigins);
+
+// ✅ Socket.IO setup
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URLS,
-    credentials: true,
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
   },
 });
 
@@ -56,8 +61,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("messages-seen", (data) => {
-    const { to } = data;
-    const receiverSocketId = onlineUsers.get(to);
+    const receiverSocketId = onlineUsers.get(data.to);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("messages-seen", data);
     }
@@ -84,10 +88,14 @@ io.on("connection", (socket) => {
 
 connectDB();
 
-app.use(cors({
-  origin: CLIENT_URLS,
-  credentials: true
-}));
+// ✅ API CORS (same origins)
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -96,6 +104,11 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/chats", chatRoutes);
+
+// optional health check
+app.get("/", (req, res) => {
+  res.send("spichat backend running");
+});
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
