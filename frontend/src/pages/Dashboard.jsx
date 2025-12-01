@@ -33,10 +33,11 @@ export default function Dashboard() {
   const [sendingMsg, setSendingMsg] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
 
-  const [conversations, setConversations] = useState([]); // 🔥 recent chats list
+  const [conversations, setConversations] = useState([]); // recent chats list
 
   const [typingFromFriend, setTypingFromFriend] = useState(false);
-  const typingTimeoutRef = useRef(null);
+  const typingTimeoutRef = useRef(null);        // friend typing indicator ke liye
+  const typingEmitTimeoutRef = useRef(null);    // humare typing emit ko debounce karne ke liye
 
   // active view: "home" | "friends" | "chat"
   const [activeTab, setActiveTab] = useState("home");
@@ -91,7 +92,6 @@ export default function Dashboard() {
       if (data.conversationId === conversationId) {
         setMessages((prev) => [...prev, data.message]);
       }
-      // naya message aaya, conversations list refresh kar lo
       loadConversations();
     };
 
@@ -196,7 +196,7 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ friend se chat open (Friends tab se) – agar conv nhi hoga to bana dega
+  // friend se chat open
   const openChatWithFriend = async (friend, existingConversationId = null) => {
     try {
       setSelectedFriend(friend);
@@ -230,10 +230,7 @@ export default function Dashboard() {
         console.error("Mark seen error", err);
       }
 
-      // ensure conversations list updated
       loadConversations();
-
-      // Chat tab pe chale jao
       setActiveTab("chat");
     } catch (err) {
       console.error("Open chat error", err);
@@ -285,18 +282,35 @@ export default function Dashboard() {
     }
   };
 
+  // ✅ debounced typing handler
   const handleInputChange = (e) => {
     const value = e.target.value;
     setMsgInput(value);
 
     if (!socket || !selectedFriend || !conversationId) return;
 
+    // user started typing -> emit isTyping: true
     socket.emit("typing", {
       conversationId,
       from: user._id,
       to: selectedFriend._id,
       isTyping: true,
     });
+
+    // purana timer clear karo
+    if (typingEmitTimeoutRef.current) {
+      clearTimeout(typingEmitTimeoutRef.current);
+    }
+
+    // agar 1 sec tak koi key press nahi hua -> isTyping: false
+    typingEmitTimeoutRef.current = setTimeout(() => {
+      socket.emit("typing", {
+        conversationId,
+        from: user._id,
+        to: selectedFriend._id,
+        isTyping: false,
+      });
+    }, 1000);
   };
 
   const handleDeleteMessage = async (msg, forEveryone = true) => {
@@ -479,7 +493,8 @@ export default function Dashboard() {
 
             {friends.length === 0 ? (
               <p className="text-xs text-slate-500">
-                You don't have any friends yet. Search above and send a request.
+                You don't have any friends yet. Search above and send a
+                request.
               </p>
             ) : (
               <div className="space-y-2 max-h-80 overflow-y-auto">
@@ -586,7 +601,7 @@ export default function Dashboard() {
     </div>
   );
 
-  // 🔥 CHAT VIEW – left: recent chats list, right: selected chat
+  // CHAT VIEW
   const ChatView = () => (
     <div className="flex-1 flex flex-col md:flex-row bg-slate-950">
       {/* LEFT: conversations list */}
@@ -799,7 +814,7 @@ export default function Dashboard() {
               }
               value={msgInput}
               onChange={handleInputChange}
-              disabled={!selectedFriend || sendingMsg}
+              disabled={!selectedFriend}
             />
             <button
               type="submit"
