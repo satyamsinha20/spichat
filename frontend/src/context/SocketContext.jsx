@@ -15,7 +15,7 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    const s = io("spichat-backend.onrender.com", {
+    const s = io("https://spichat.onrender.com", {
       withCredentials: true,
     });
 
