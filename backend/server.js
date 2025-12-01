@@ -17,10 +17,13 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// Use environment variables for frontend URLs
+const CLIENT_URLS = [process.env.CLIENT_URL, process.env.PROD_CLIENT_URL];
+
 // Socket.IO setup (for real-time chat)
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173", // frontend ka URL
+    origin: CLIENT_URLS,
     credentials: true,
   },
 });
@@ -31,35 +34,20 @@ const onlineUsers = new Map();
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  // user online
-  // client: socket.emit("user-online", user._id);
   socket.on("user-online", (userId) => {
     onlineUsers.set(userId, socket.id);
     io.emit("online-users", Array.from(onlineUsers.keys()));
   });
 
-  // 💬 send message real-time
-  // client approx:
-  // socket.emit("send-message", {
-  //   conversationId,
-  //   receiverId,
-  //   senderId: user._id,
-  //   text,
-  //   createdAt: savedMessage.createdAt,
-  //   message: savedMessage,
-  // });
   socket.on("send-message", (data) => {
     const { receiverId } = data;
     const receiverSocketId = onlineUsers.get(receiverId);
 
     if (receiverSocketId) {
-      // doosre user ko yehi data real-time bhej rahe hain
       io.to(receiverSocketId).emit("receive-message", data);
     }
   });
 
-  // ✍ typing indicator
-  // data: { conversationId, from, to, isTyping }
   socket.on("typing", (data) => {
     const receiverSocketId = onlineUsers.get(data.to);
     if (receiverSocketId) {
@@ -67,8 +55,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ messages seen
-  // data: { conversationId, userId, to }
   socket.on("messages-seen", (data) => {
     const { to } = data;
     const receiverSocketId = onlineUsers.get(to);
@@ -77,8 +63,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 🗑 message deleted
-  // data: { conversationId, messageId, updated, to }
   socket.on("message-deleted", (data) => {
     const receiverSocketId = onlineUsers.get(data.to);
     if (receiverSocketId) {
@@ -100,7 +84,10 @@ io.on("connection", (socket) => {
 
 connectDB();
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.use(cors({
+  origin: CLIENT_URLS,
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 
