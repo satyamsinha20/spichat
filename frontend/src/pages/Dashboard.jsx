@@ -283,34 +283,38 @@ export default function Dashboard() {
   };
 
   // ✅ debounced typing handler
+  // const handleInputChange = (e) => {
+  //   const value = e.target.value;
+  //   setMsgInput(value);
+
+  //   if (!socket || !selectedFriend || !conversationId) return;
+
+  //   // user started typing -> emit isTyping: true
+  //   socket.emit("typing", {
+  //     conversationId,
+  //     from: user._id,
+  //     to: selectedFriend._id,
+  //     isTyping: true,
+  //   });
+
+  //   // purana timer clear karo
+  //   if (typingEmitTimeoutRef.current) {
+  //     clearTimeout(typingEmitTimeoutRef.current);
+  //   }
+
+  //   // agar 1 sec tak koi key press nahi hua -> isTyping: false
+  //   typingEmitTimeoutRef.current = setTimeout(() => {
+  //     socket.emit("typing", {
+  //       conversationId,
+  //       from: user._id,
+  //       to: selectedFriend._id,
+  //       isTyping: false,
+  //     });
+  //   }, 1000);
+  // };
   const handleInputChange = (e) => {
-    const value = e.target.value;
-    setMsgInput(value);
-
-    if (!socket || !selectedFriend || !conversationId) return;
-
-    // user started typing -> emit isTyping: true
-    socket.emit("typing", {
-      conversationId,
-      from: user._id,
-      to: selectedFriend._id,
-      isTyping: true,
-    });
-
-    // purana timer clear karo
-    if (typingEmitTimeoutRef.current) {
-      clearTimeout(typingEmitTimeoutRef.current);
-    }
-
-    // agar 1 sec tak koi key press nahi hua -> isTyping: false
-    typingEmitTimeoutRef.current = setTimeout(() => {
-      socket.emit("typing", {
-        conversationId,
-        from: user._id,
-        to: selectedFriend._id,
-        isTyping: false,
-      });
-    }, 1000);
+    // sirf local state update – koi socket emit nahi
+    setMsgInput(e.target.value);
   };
 
   const handleDeleteMessage = async (msg, forEveryone = true) => {
@@ -502,9 +506,8 @@ export default function Dashboard() {
                   <button
                     key={f._id}
                     onClick={() => openChatWithFriend(f)}
-                    className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${
-                      selectedFriend?._id === f._id ? "bg-slate-800" : ""
-                    }`}
+                    className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${selectedFriend?._id === f._id ? "bg-slate-800" : ""
+                      }`}
                   >
                     <div className="flex items-center gap-2">
                       {f.profilePic ? (
@@ -629,9 +632,8 @@ export default function Dashboard() {
                 <button
                   key={conv._id}
                   onClick={() => openChatWithFriend(partner, conv._id)}
-                  className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${
-                    isActive ? "bg-slate-800" : ""
-                  }`}
+                  className={`w-full flex items-center justify-between px-2 py-2 rounded-lg text-left text-xs hover:bg-slate-800/80 ${isActive ? "bg-slate-800" : ""
+                    }`}
                 >
                   <div className="flex items-center gap-2">
                     {partner?.profilePic ? (
@@ -755,11 +757,10 @@ export default function Dashboard() {
                     )}
 
                     <div
-                      className={`px-3 py-2 rounded-2xl text-xs ${
-                        isMe
+                      className={`px-3 py-2 rounded-2xl text-xs ${isMe
                           ? "bg-indigo-600 text-white rounded-br-sm"
                           : "bg-slate-800 text-slate-100 rounded-bl-sm"
-                      }`}
+                        }`}
                     >
                       <div
                         className={
@@ -814,7 +815,7 @@ export default function Dashboard() {
               }
               value={msgInput}
               onChange={handleInputChange}
-              disabled={!selectedFriend}
+              //disabled={!selectedFriend}
             />
             <button
               type="submit"
@@ -851,21 +852,19 @@ export default function Dashboard() {
         <nav className="flex items-center gap-1 md:gap-2 text-[11px] md:text-xs">
           <button
             onClick={() => setActiveTab("home")}
-            className={`px-3 py-1 rounded-full border ${
-              activeTab === "home"
+            className={`px-3 py-1 rounded-full border ${activeTab === "home"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-            }`}
+              }`}
           >
             Home
           </button>
           <button
             onClick={() => setActiveTab("friends")}
-            className={`px-3 py-1 rounded-full border flex items-center gap-1 ${
-              activeTab === "friends"
+            className={`px-3 py-1 rounded-full border flex items-center gap-1 ${activeTab === "friends"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-            }`}
+              }`}
           >
             Friends
             {friends.length > 0 && (
@@ -876,11 +875,10 @@ export default function Dashboard() {
           </button>
           <button
             onClick={() => setActiveTab("chat")}
-            className={`px-3 py-1 rounded-full border ${
-              activeTab === "chat"
+            className={`px-3 py-1 rounded-full border ${activeTab === "chat"
                 ? "border-indigo-500 bg-indigo-600/20"
                 : "border-transparent hover:bg-slate-900"
-            }`}
+              }`}
           >
             Chat
           </button>
