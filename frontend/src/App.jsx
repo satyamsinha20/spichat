@@ -16,20 +16,34 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Landing page */}
+      {/* landing page */}
       <Route
         path="/"
-        element={
-          // agar already logged in ho aur root pe aaye ho to direct dashboard
-          user ? <Navigate to="/dashboard" replace /> : <Home />
-        }
+        element={user ? <Navigate to="/dashboard" replace /> : <Home />}
       />
 
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
+      {/* 🔥 dashboard ke alag-alag pages */}
       <Route
         path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/friends"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/chat"
         element={
           <ProtectedRoute>
             <Dashboard />
