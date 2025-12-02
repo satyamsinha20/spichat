@@ -18,14 +18,14 @@ export const SocketProvider = ({ children }) => {
 
     const s = io("https://spichat-backend.onrender.com", {
       withCredentials: true,
-      // transports ko force mat karo – default rehne do (polling + websocket)
+      // transports: default rakho (polling + websocket)
       reconnection: true,
       reconnectionAttempts: 5,
     });
 
     s.on("connect", () => {
       console.log("Socket connected from client:", s.id);
-      // 🔥 yahi se server ko bata rahe hain kaun sa user online hai
+      // backend ke user-online handler se match
       s.emit("user-online", user._id);
     });
 
@@ -38,7 +38,7 @@ export const SocketProvider = ({ children }) => {
     return () => {
       s.disconnect();
     };
-  }, [user]); // socket ko dependency me mat daalna
+  }, [user]); // yaha dependency sirf user
 
   return (
     <SocketContext.Provider value={{ socket }}>
