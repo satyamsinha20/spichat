@@ -1,4 +1,3 @@
-// src/context/SocketContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useAuth } from "./AuthContext";
@@ -18,14 +17,13 @@ export const SocketProvider = ({ children }) => {
 
     const s = io("https://spichat-backend.onrender.com", {
       withCredentials: true,
-      // transports: default rakho (polling + websocket)
       reconnection: true,
       reconnectionAttempts: 5,
     });
 
     s.on("connect", () => {
       console.log("Socket connected from client:", s.id);
-      // backend ke user-online handler se match
+      // backend ke user-online handler ke liye
       s.emit("user-online", user._id);
     });
 
@@ -38,7 +36,7 @@ export const SocketProvider = ({ children }) => {
     return () => {
       s.disconnect();
     };
-  }, [user]); // yaha dependency sirf user
+  }, [user]); // yaha sirf user dependency
 
   return (
     <SocketContext.Provider value={{ socket }}>
