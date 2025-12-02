@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
@@ -70,7 +70,8 @@ export default function Dashboard() {
     load();
   }, [token]);
 
-  const loadConversations = async () => {
+  // conversations load ko memoize karte hain taaki socket effect me use kar saken
+  const loadConversations = useCallback(async () => {
     if (!token) return;
     try {
       const data = await getMyConversations(token);
@@ -78,34 +79,43 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Load conversations error", err);
     }
-  };
+  }, [token]);
 
   // chat tab pe aaye → recent chats load
   useEffect(() => {
     if (activeTab === "chat") {
       loadConversations();
     }
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, loadConversations]);
 
-  // ---------- socket listeners ----------
+  // ---------- socket: online list + messages ----------
   useEffect(() => {
     if (!socket || !user) return;
 
-    // apne aap ko online mark karo
+    console.log("🔌 socket useEffect init, conv:", conversationId);
+
+    // bas info ke liye, backend agar 'user-online' sun raha ho to
     socket.emit("user-online", user._id);
 
     const handleOnline = (ids) => {
+      console.log("🟢 online-users:", ids);
       setOnlineUsers(ids);
     };
 
     const handleReceiveMessage = (data) => {
+      console.log("📩 receive-message client:", data);
+
+      // agar same conversation open hai to UI me add karo
       if (data.conversationId === conversationId) {
         setMessages((prev) => [...prev, data.message]);
       }
+
+      // list hamesha refresh karo (unread / last message etc ke liye)
       loadConversations();
     };
 
     const handleMessagesSeen = (data) => {
+      console.log("👀 messages-seen client:", data);
       if (
         data.conversationId === conversationId &&
         data.userId === selectedFriend?._id
@@ -121,6 +131,7 @@ export default function Dashboard() {
     };
 
     const handleMessageDeleted = (data) => {
+      console.log("🗑 message-deleted client:", data);
       if (data.conversationId !== conversationId) return;
       setMessages((prev) =>
         prev
@@ -142,7 +153,7 @@ export default function Dashboard() {
       socket.off("messages-seen", handleMessagesSeen);
       socket.off("message-deleted", handleMessageDeleted);
     };
-  }, [socket, conversationId, user, selectedFriend]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [socket, user, conversationId, selectedFriend, loadConversations]);
 
   const isFriendOnline = (friendId) => {
     return onlineUsers.includes(friendId);
@@ -238,6 +249,7 @@ export default function Dashboard() {
     const text = msgInputRef.current.value.trim();
     if (!text) return;
 
+    // input clear
     msgInputRef.current.value = "";
     setSendingMsg(true);
 
@@ -249,18 +261,21 @@ export default function Dashboard() {
         token
       );
 
+      // apne UI me turant dikhado
       setMessages((prev) => [...prev, savedMessage]);
       loadConversations();
 
       if (socket) {
-        socket.emit("send-message", {
+        const payload = {
           conversationId,
           receiverId: selectedFriend._id,
           senderId: user._id,
           text,
           createdAt: savedMessage.createdAt,
           message: savedMessage,
-        });
+        };
+        console.log("📤 send-message emit:", payload);
+        socket.emit("send-message", payload);
       }
     } catch (err) {
       console.error("Send message error", err);
