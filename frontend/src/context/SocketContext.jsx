@@ -17,7 +17,7 @@ export const SocketProvider = ({ children }) => {
 
     const s = io("https://spichat-backend.onrender.com", {
       withCredentials: true,
-      transports: ["websocket"],       // force websocket
+      transports: ["websocket", "polling"],       // force websocket
       auth: { userId: user._id },      // yahi se room join hoga
       reconnection: true,
       reconnectionAttempts: 5,
