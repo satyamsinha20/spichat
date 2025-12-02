@@ -4,6 +4,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const dotenv = require("dotenv");
 const { Server } = require("socket.io");
+const https = require("https");           // 🔹 keep-alive ping ke liye
 const connectDB = require("./config/db");
 
 // routes
@@ -34,7 +35,10 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
+  // 🔹 websocket ko prefer karo, polling fallback rahe
+  transports: ["websocket", "polling"],
 });
 
 io.on("connection", (socket) => {
@@ -43,10 +47,7 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id, "user:", userId);
 
   if (userId) {
-    // socket pe userId store
     socket.userId = String(userId);
-
-    // user ke room me join karao (multi-device)
     socket.join(socket.userId);
 
     const prev = onlineUsers.get(socket.userId) || 0;
@@ -64,10 +65,9 @@ io.on("connection", (socket) => {
     const rId = String(receiverId);
     const sId = String(senderId);
 
-    // 1) receiver ke saare devices
+    // receiver ke saare devices
     io.to(rId).emit("receive-message", data);
-
-    // 2) sender ke baaki devices (jis socket ne bheja usko chhod ke)
+    // sender ke dusre devices
     socket.to(sId).emit("receive-message", data);
   });
 
@@ -80,8 +80,8 @@ io.on("connection", (socket) => {
     const toId = String(to);
     const fromId = from ? String(from) : null;
 
-    io.to(toId).emit("typing", data);     // receiver side
-    if (fromId) socket.to(fromId).emit("typing", data); // sender ke dusre devices
+    io.to(toId).emit("typing", data);
+    if (fromId) socket.to(fromId).emit("typing", data);
   });
 
   // ---- messages seen ----
@@ -143,6 +143,21 @@ app.use("/api/chats", chatRoutes);
 app.get("/", (req, res) => {
   res.send("spichat backend running");
 });
+
+// ========= Render keep-alive (optional but helpful on free tier) =========
+const PING_URL =
+  process.env.RENDER_EXTERNAL_URL || "https://spichat-backend.onrender.com";
+
+setInterval(() => {
+  https
+    .get(PING_URL, (res) => {
+      // response consume karo bas, kuch nahi karna
+      res.on("data", () => {});
+    })
+    .on("error", (err) => {
+      console.log("Keep-alive ping error:", err.message);
+    });
+}, 4 * 60 * 1000); // har 4 minute me ping
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
