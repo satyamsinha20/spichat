@@ -1,3 +1,4 @@
+// src/context/SocketContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useAuth } from "./AuthContext";
@@ -17,14 +18,15 @@ export const SocketProvider = ({ children }) => {
 
     const s = io("https://spichat-backend.onrender.com", {
       withCredentials: true,
-      transports: ["websocket", "polling"],       // force websocket
-      auth: { userId: user._id },      // yahi se room join hoga
+      // transports ko force mat karo – default rehne do (polling + websocket)
       reconnection: true,
       reconnectionAttempts: 5,
     });
 
     s.on("connect", () => {
       console.log("Socket connected from client:", s.id);
+      // 🔥 yahi se server ko bata rahe hain kaun sa user online hai
+      s.emit("user-online", user._id);
     });
 
     s.on("disconnect", (reason) => {
@@ -36,7 +38,7 @@ export const SocketProvider = ({ children }) => {
     return () => {
       s.disconnect();
     };
-  }, [user]);
+  }, [user]); // socket ko dependency me mat daalna
 
   return (
     <SocketContext.Provider value={{ socket }}>
