@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
 import {
@@ -16,7 +17,10 @@ import {
   markMessagesSeen,
   deleteMessageApi,
 } from "../api/chat";
-import { useLocation, useNavigate } from "react-router-dom";
+
+import DashboardHome from "./DashboardHome";
+import FriendsPage from "./FriendsPage";
+import ChatPage from "./ChatPage";
 
 export default function Dashboard() {
   const { user, token, logout } = useAuth();
@@ -35,18 +39,21 @@ export default function Dashboard() {
   const [sendingMsg, setSendingMsg] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [conversations, setConversations] = useState([]);
+
+  // message input (uncontrolled)
   const msgInputRef = useRef(null);
 
-  const activeTab =
-    location.pathname.includes("/friends")
-      ? "friends"
-      : location.pathname.includes("/chat")
-      ? "chat"
-      : "home";
+  // URL → active tab
+  const activeTab = location.pathname.includes("/friends")
+    ? "friends"
+    : location.pathname.includes("/chat")
+    ? "chat"
+    : "home";
 
-  // initial load 
+  // ---------- data initial load ----------
   useEffect(() => {
     if (!token) return;
+
     const load = async () => {
       try {
         const [friendsData, reqData] = await Promise.all([
@@ -56,67 +63,142 @@ export default function Dashboard() {
         setFriends(friendsData);
         setRequests(reqData);
       } catch (err) {
-        console.error("Dashboard initial load", err);
+        console.error("Initial dashboard load error", err);
       }
     };
+
     load();
   }, [token]);
 
   const loadConversations = async () => {
+    if (!token) return;
     try {
       const data = await getMyConversations(token);
       setConversations(data);
     } catch (err) {
-      console.error("Conversations load error", err);
+      console.error("Load conversations error", err);
     }
   };
 
+  // chat tab pe aaye → recent chats load
   useEffect(() => {
-    if (activeTab === "chat") loadConversations();
-  }, [activeTab]);
+    if (activeTab === "chat") {
+      loadConversations();
+    }
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // SOCKET event listeners
+  // ---------- socket listeners ----------
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !user) return;
 
+    // apne aap ko online mark karo
     socket.emit("user-online", user._id);
 
-    socket.on("online-users", setOnlineUsers);
+    const handleOnline = (ids) => {
+      setOnlineUsers(ids);
+    };
 
-    socket.on("receive-message", (data) => {
+    const handleReceiveMessage = (data) => {
       if (data.conversationId === conversationId) {
         setMessages((prev) => [...prev, data.message]);
       }
       loadConversations();
-    });
+    };
+
+    const handleMessagesSeen = (data) => {
+      if (
+        data.conversationId === conversationId &&
+        data.userId === selectedFriend?._id
+      ) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.sender === user._id || m.sender?._id === user._id
+              ? { ...m, seen: true }
+              : m
+          )
+        );
+      }
+    };
+
+    const handleMessageDeleted = (data) => {
+      if (data.conversationId !== conversationId) return;
+      setMessages((prev) =>
+        prev
+          .map((m) =>
+            m._id === data.messageId ? { ...m, ...data.updated } : m
+          )
+          .filter((m) => !m.deletedFor?.includes(user._id))
+      );
+    };
+
+    socket.on("online-users", handleOnline);
+    socket.on("receive-message", handleReceiveMessage);
+    socket.on("messages-seen", handleMessagesSeen);
+    socket.on("message-deleted", handleMessageDeleted);
 
     return () => {
-      socket.off("online-users");
-      socket.off("receive-message");
+      socket.off("online-users", handleOnline);
+      socket.off("receive-message", handleReceiveMessage);
+      socket.off("messages-seen", handleMessagesSeen);
+      socket.off("message-deleted", handleMessageDeleted);
     };
-  }, [socket, conversationId]);
+  }, [socket, conversationId, user, selectedFriend]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const isFriendOnline = (friendId) => {
+    return onlineUsers.includes(friendId);
+  };
+
+  // ---------- handlers: friends / search ----------
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) {
       setSearchResults([]);
       return;
     }
+
     try {
-      const data = await searchUsers(searchQuery, token);
+      const data = await searchUsers(searchQuery.trim(), token);
       setSearchResults(data);
     } catch (err) {
-      console.error(err);
+      console.error("Search error", err);
     }
   };
 
-  const openChatWithFriend = async (friend, existingConvId = null) => {
+  const handleSendFriendRequest = async (userId) => {
+    try {
+      await sendFriendRequest(userId, token);
+      alert("Friend request sent ✅");
+    } catch (err) {
+      alert(
+        err?.response?.data?.message || "Could not send friend request."
+      );
+    }
+  };
+
+  const handleRespondRequest = async (id, action) => {
+    try {
+      await respondFriendRequest(id, action, token);
+      const [friendsData, reqData] = await Promise.all([
+        getFriends(token),
+        getIncomingRequests(token),
+      ]);
+      setFriends(friendsData);
+      setRequests(reqData);
+    } catch (err) {
+      console.error("Respond request error", err);
+    }
+  };
+
+  // ---------- chat open / send / delete ----------
+  const openChatWithFriend = async (friend, existingConversationId = null) => {
     try {
       setSelectedFriend(friend);
       setLoadingChat(true);
       setMessages([]);
+      setConversationId(null);
 
-      let convId = existingConvId;
+      let convId = existingConversationId;
+
       if (!convId) {
         const conv = await getOrCreateConversation(friend._id, token);
         convId = conv._id;
@@ -124,20 +206,34 @@ export default function Dashboard() {
 
       setConversationId(convId);
 
-      const data = await getMessages(convId, token);
-      setMessages(data);
+      const msgs = await getMessages(convId, token);
+      setMessages(msgs);
 
+      try {
+        await markMessagesSeen(convId, token);
+        if (socket) {
+          socket.emit("messages-seen", {
+            conversationId: convId,
+            userId: user._id,
+            to: friend._id,
+          });
+        }
+      } catch (err) {
+        console.error("Mark seen error", err);
+      }
+
+      loadConversations();
       navigate("/dashboard/chat");
     } catch (err) {
-      console.error("Chat open error", err);
+      console.error("Open chat error", err);
     } finally {
       setLoadingChat(false);
     }
   };
 
   const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!selectedFriend || !msgInputRef.current) return;
+    e?.preventDefault?.();
+    if (!conversationId || !selectedFriend || !msgInputRef.current) return;
 
     const text = msgInputRef.current.value.trim();
     if (!text) return;
@@ -156,113 +252,205 @@ export default function Dashboard() {
       setMessages((prev) => [...prev, savedMessage]);
       loadConversations();
 
-      socket.emit("send-message", {
-        conversationId,
-        receiverId: selectedFriend._id,
-        senderId: user._id,
-        text,
-        message: savedMessage,
-      });
+      if (socket) {
+        socket.emit("send-message", {
+          conversationId,
+          receiverId: selectedFriend._id,
+          senderId: user._id,
+          text,
+          createdAt: savedMessage.createdAt,
+          message: savedMessage,
+        });
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Send message error", err);
     } finally {
       setSendingMsg(false);
     }
   };
 
-  // ---------- Views ----------
-  const HomeView = () => (
-    <div className="flex-1 flex items-center justify-center">
-      <button
-        className="bg-indigo-600 px-4 py-2 rounded-lg"
-        onClick={() => navigate("/dashboard/friends")}
-      >
-        Add Friends & Chat
-      </button>
-    </div>
+  const handleDeleteMessage = async (msg, forEveryone = true) => {
+    const confirmText = forEveryone
+      ? "Delete this message for everyone?"
+      : "Delete this message for you only?";
+
+    if (!window.confirm(confirmText)) return;
+
+    try {
+      const res = await deleteMessageApi(msg._id, forEveryone, token);
+      const updated = res.updated;
+
+      setMessages((prev) =>
+        prev
+          .map((m) => (m._id === msg._id ? { ...m, ...updated } : m))
+          .filter((m) => !m.deletedFor?.includes(user._id))
+      );
+
+      if (socket && selectedFriend && conversationId && forEveryone) {
+        socket.emit("message-deleted", {
+          conversationId,
+          messageId: msg._id,
+          updated,
+          to: selectedFriend._id,
+        });
+      }
+      loadConversations();
+    } catch (err) {
+      console.error("Delete message error", err);
+    }
+  };
+
+  // filter messages deleted for current user
+  const visibleMessages = messages.filter(
+    (m) => !m.deletedFor?.includes(user._id)
   );
 
-  const FriendsView = () => (
-    <div className="p-4">
-      <form className="flex gap-2 mb-4" onSubmit={handleSearch}>
-        <input
-          className="bg-slate-800 px-3 py-2 rounded"
-          placeholder="Search user..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <button className="bg-indigo-600 px-3 py-2 rounded-lg">Search</button>
-      </form>
+  const lastMyMessageId =
+    visibleMessages
+      .filter(
+        (mm) => mm.sender === user._id || mm.sender?._id === user._id
+      )
+      .slice(-1)[0]?._id || null;
 
-      <h3 className="text-sm font-bold mb-2">Your Friends</h3>
-      {friends.map((f) => (
-        <div
-          key={f._id}
-          className="bg-slate-800 p-3 mb-2 rounded cursor-pointer"
-          onClick={() => openChatWithFriend(f)}
-        >
-          {f.name}
+  const onlineCount = friends.filter((f) => isFriendOnline(f._id)).length;
+
+  // ---------- UI ----------
+  return (
+    <div className="h-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
+      {/* Navbar */}
+      <header className="h-14 flex items-center justify-between px-4 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-xs font-bold shadow-md">
+            sP
+          </div>
+          <div className="flex flex-col leading-tight">
+            <span className="font-semibold text-sm md:text-base">
+              sPichat
+            </span>
+            <span className="text-[10px] text-slate-400 hidden sm:block">
+              Connect with your friends instantly
+            </span>
+          </div>
         </div>
-      ))}
-    </div>
-  );
 
-  const ChatView = () => (
-    <div className="flex-1 flex flex-col">
-      <div className="bg-slate-900 p-3 border-b">Chat with {selectedFriend?.name}</div>
-
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.map((m) => (
-          <div
-            key={m._id}
-            className={`p-2 rounded-lg max-w-xs ${
-              m.sender === user._id ? "bg-indigo-600 ml-auto" : "bg-slate-700"
+        {/* Tabs */}
+        <nav className="flex items-center gap-1 md:gap-2 text-[11px] md:text-xs">
+          <button
+            onClick={() => navigate("/dashboard")}
+            className={`px-3 py-1 rounded-full border ${
+              activeTab === "home"
+                ? "border-indigo-500 bg-indigo-600/20"
+                : "border-transparent hover:bg-slate-900"
             }`}
           >
-            {m.text}
-          </div>
-        ))}
-      </div>
-
-      <form
-        onSubmit={handleSendMessage}
-        className="p-3 border-t flex gap-2"
-      >
-        <input
-          ref={msgInputRef}
-          className="flex-1 bg-slate-800 px-3 py-2 rounded"
-          placeholder="Type..."
-        />
-        <button className="bg-indigo-600 px-3 py-2 rounded-lg">Send</button>
-      </form>
-    </div>
-  );
-
-  return (
-    <div className="h-screen flex flex-col bg-slate-950 text-white">
-      {/* Navbar */}
-      <header className="h-14 flex items-center justify-between border-b px-4">
-        <span className="font-bold">sPichat</span>
-
-        <nav className="flex gap-3 text-sm">
-          <button onClick={() => navigate("/dashboard")} className={activeTab === "home" ? "text-indigo-400" : ""}>
             Home
           </button>
-          <button onClick={() => navigate("/dashboard/friends")} className={activeTab === "friends" ? "text-indigo-400" : ""}>
+          <button
+            onClick={() => navigate("/dashboard/friends")}
+            className={`px-3 py-1 rounded-full border flex items-center gap-1 ${
+              activeTab === "friends"
+                ? "border-indigo-500 bg-indigo-600/20"
+                : "border-transparent hover:bg-slate-900"
+            }`}
+          >
             Friends
+            {friends.length > 0 && (
+              <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded-full">
+                {friends.length}
+              </span>
+            )}
           </button>
-          <button onClick={() => navigate("/dashboard/chat")} className={activeTab === "chat" ? "text-indigo-400" : ""}>
+          <button
+            onClick={() => navigate("/dashboard/chat")}
+            className={`px-3 py-1 rounded-full border ${
+              activeTab === "chat"
+                ? "border-indigo-500 bg-indigo-600/20"
+                : "border-transparent hover:bg-slate-900"
+            }`}
+          >
             Chat
           </button>
         </nav>
 
-        <button onClick={logout}>Logout</button>
+        {/* User + logout */}
+        <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2 text-xs text-slate-300">
+            {user?.profilePic ? (
+              <img
+                src={user.profilePic}
+                alt={user.name}
+                className="w-7 h-7 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center text-[10px]">
+                {user?.name?.[0]}
+              </div>
+            )}
+            <div className="leading-tight">
+              <div className="font-medium truncate max-w-[100px]">
+                {user?.name}
+              </div>
+              <div className="text-[10px] text-slate-400">
+                @{user?.username}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={logout}
+            className="px-3 py-1 rounded-lg text-[11px] bg-slate-900 border border-slate-700 hover:bg-slate-800"
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
-      {/* Page Content */}
-      {activeTab === "home" && <HomeView />}
-      {activeTab === "friends" && <FriendsView />}
-      {activeTab === "chat" && <ChatView />}
+      {/* Page content */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {activeTab === "home" && (
+          <DashboardHome
+            user={user}
+            friendsCount={friends.length}
+            requestsCount={requests.length}
+            onlineCount={onlineCount}
+            onGoFriends={() => navigate("/dashboard/friends")}
+            onGoChat={() => navigate("/dashboard/chat")}
+          />
+        )}
+
+        {activeTab === "friends" && (
+          <FriendsPage
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            onSearch={handleSearch}
+            searchResults={searchResults}
+            friends={friends}
+            requests={requests}
+            onSendFriendRequest={handleSendFriendRequest}
+            onRespondRequest={handleRespondRequest}
+            onOpenChat={openChatWithFriend}
+            isFriendOnline={isFriendOnline}
+          />
+        )}
+
+        {activeTab === "chat" && (
+          <ChatPage
+            user={user}
+            conversations={conversations}
+            selectedFriend={selectedFriend}
+            messages={visibleMessages}
+            loadingChat={loadingChat}
+            sendingMsg={sendingMsg}
+            msgInputRef={msgInputRef}
+            onSendMessage={handleSendMessage}
+            onOpenChat={openChatWithFriend}
+            onBackHome={() => navigate("/dashboard")}
+            isFriendOnline={isFriendOnline}
+            onDeleteMessage={handleDeleteMessage}
+            lastMyMessageId={lastMyMessageId}
+          />
+        )}
+      </main>
     </div>
   );
 }

@@ -16,16 +16,18 @@ export default function App() {
 
   return (
     <Routes>
-      {/* landing page */}
+      {/* Landing page */}
       <Route
         path="/"
-        element={user ? <Navigate to="/dashboard" replace /> : <Home />}
+        element={
+          user ? <Navigate to="/dashboard" replace /> : <Home />
+        }
       />
 
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
-      {/* 🔥 dashboard ke alag-alag pages */}
+      {/* Dashboard pages */}
       <Route
         path="/dashboard"
         element={
