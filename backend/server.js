@@ -25,9 +25,9 @@ const allowedOrigins = [
 
 console.log("Allowed origins:", allowedOrigins);
 
-// ----------------- SOCKET.IO SETUP (multi-device) -----------------
+// ========== SOCKET.IO (multi–device support) ==========
 
-// userId -> Set<socketId>
+// userId -> active connections count (for online list)
 const onlineUsers = new Map();
 
 const io = new Server(server, {
@@ -37,118 +37,99 @@ const io = new Server(server, {
   },
 });
 
-function getUserSockets(userId) {
-  return onlineUsers.get(userId) || new Set();
-}
-
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  // user online
+  // ---- user online ----
   socket.on("user-online", (userId) => {
     if (!userId) return;
 
-    const existing = onlineUsers.get(userId) || new Set();
-    existing.add(socket.id);
-    onlineUsers.set(userId, existing);
+    // socket ko userId yaad rakho
+    socket.userId = userId;
 
-    // sirf unique userIds bhejte hain
+    // user ke room me join karao (multi-device)
+    socket.join(userId);
+
+    const prevCount = onlineUsers.get(userId) || 0;
+    onlineUsers.set(userId, prevCount + 1);
+
     io.emit("online-users", Array.from(onlineUsers.keys()));
   });
 
-  // send-message: receiver + sender ke saare sockets ko bhejo
+  // ---- send message ----
+  // data: { conversationId, receiverId, senderId, text, createdAt, message }
   socket.on("send-message", (data) => {
-    const { receiverId, senderId } = data;
+    const { receiverId, senderId } = data || {};
     if (!receiverId || !senderId) return;
 
-    const receiverSockets = getUserSockets(receiverId);
-    const senderSockets = getUserSockets(senderId);
+    // receiver ke SAARE devices
+    io.to(receiverId).emit("receive-message", data);
 
-    const targets = new Set([
-      ...receiverSockets,
-      ...senderSockets,
-    ]);
-
-    // jis socket ne message bheja usko dobara mat bhejo
-    targets.delete(socket.id);
-
-    targets.forEach((sockId) => {
-      io.to(sockId).emit("receive-message", data);
-    });
+    // sender ke baaki devices (jis device se bheja usko chhod ke)
+    socket.to(senderId).emit("receive-message", data);
   });
 
-  // typing indicator (optional multi-device)
+  // ---- typing indicator ----
+  // data: { conversationId, from, to, isTyping }
   socket.on("typing", (data) => {
     const { from, to } = data || {};
     if (!to) return;
 
-    const receiverSockets = getUserSockets(to);
+    // receiver ke saare devices
+    io.to(to).emit("typing", data);
 
-    receiverSockets.forEach((sockId) => {
-      // sender ka current socket already type kar raha hai, usko mat bhejo
-      if (sockId === socket.id) return;
-      io.to(sockId).emit("typing", data);
-    });
+    // optionally: sender ke dusre devices ko bhi dikha sakte ho
+    socket.to(from).emit("typing", data);
   });
 
-  // messages-seen (both sides ke devices ko update)
+  // ---- messages seen ----
+  // data: { conversationId, userId, to }
   socket.on("messages-seen", (data) => {
     const { to, userId } = data || {};
     if (!to) return;
 
-    const receiverSockets = getUserSockets(to);
-    const senderSockets = userId ? getUserSockets(userId) : new Set();
+    // receiver side (jisko tumne seen notify kiya)
+    io.to(to).emit("messages-seen", data);
 
-    const targets = new Set([
-      ...receiverSockets,
-      ...senderSockets,
-    ]);
-
-    targets.forEach((sockId) => {
-      if (sockId === socket.id) return;
-      io.to(sockId).emit("messages-seen", data);
-    });
+    // sender ke dusre devices
+    if (userId) {
+      socket.to(userId).emit("messages-seen", data);
+    }
   });
 
-  // message-deleted
+  // ---- message deleted ----
+  // data: { conversationId, messageId, updated, to, from }
   socket.on("message-deleted", (data) => {
     const { to, from } = data || {};
     if (!to && !from) return;
 
-    const toSockets = to ? getUserSockets(to) : new Set();
-    const fromSockets = from ? getUserSockets(from) : new Set();
-
-    const targets = new Set([
-      ...toSockets,
-      ...fromSockets,
-    ]);
-
-    targets.forEach((sockId) => {
-      if (sockId === socket.id) return;
-      io.to(sockId).emit("message-deleted", data);
-    });
+    if (to) {
+      io.to(to).emit("message-deleted", data);
+    }
+    if (from) {
+      socket.to(from).emit("message-deleted", data);
+    }
   });
 
+  // ---- disconnect ----
   socket.on("disconnect", () => {
-    // iss socket ko saare users ke Set se remove karo
-    for (const [userId, sockets] of onlineUsers.entries()) {
-      if (sockets.has(socket.id)) {
-        sockets.delete(socket.id);
-        if (sockets.size === 0) {
-          onlineUsers.delete(userId);
-        } else {
-          onlineUsers.set(userId, sockets);
-        }
-        break;
+    const userId = socket.userId;
+
+    if (userId) {
+      const prevCount = onlineUsers.get(userId) || 0;
+      if (prevCount <= 1) {
+        onlineUsers.delete(userId);
+      } else {
+        onlineUsers.set(userId, prevCount - 1);
       }
+      io.emit("online-users", Array.from(onlineUsers.keys()));
     }
 
-    io.emit("online-users", Array.from(onlineUsers.keys()));
     console.log("Client disconnected:", socket.id);
   });
 });
 
-// ----------------- REST API -----------------
+// ========== REST API ==========
 
 connectDB();
 
@@ -167,6 +148,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/chats", chatRoutes);
 
+// health check
 app.get("/", (req, res) => {
   res.send("spichat backend running");
 });
