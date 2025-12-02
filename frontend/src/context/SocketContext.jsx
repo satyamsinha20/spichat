@@ -1,4 +1,3 @@
-// src/context/SocketContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { useAuth } from "./AuthContext";
@@ -18,11 +17,18 @@ export const SocketProvider = ({ children }) => {
 
     const s = io("https://spichat-backend.onrender.com", {
       withCredentials: true,
-      transports: ["websocket"], // ye lagana achha hai
+      transports: ["websocket"],       // force websocket
+      auth: { userId: user._id },      // yahi se room join hoga
+      reconnection: true,
+      reconnectionAttempts: 5,
     });
 
     s.on("connect", () => {
-      s.emit("user-online", user._id);
+      console.log("Socket connected from client:", s.id);
+    });
+
+    s.on("disconnect", (reason) => {
+      console.log("Socket disconnected:", reason);
     });
 
     setSocket(s);
