@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 export default function ChatPage({
   user,
   conversations,
@@ -13,6 +15,22 @@ export default function ChatPage({
   onDeleteMessage,
   lastMyMessageId,
 }) {
+  // 👇 last message tak scroll karne ke liye ref
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "smooth", // agar instant jump chahiye to "auto" kar dena
+      });
+    }
+  };
+
+  // jab bhi messages change hon ya selectedFriend change ho → neeche scroll
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, selectedFriend]);
+
   return (
     <div className="flex-1 flex flex-col md:flex-row bg-slate-950 overflow-hidden">
       {/* LEFT: recent chats list */}
@@ -144,63 +162,72 @@ export default function ChatPage({
               No messages yet. Say hi 👋
             </div>
           ) : (
-            messages.map((m) => {
-              const isMe =
-                m.sender === user._id || m.sender?._id === user._id;
-              const showDeleted = m.isDeleted;
-              const timeStr = new Date(m.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-              const isLastMyMessage = isMe && m._id === lastMyMessageId;
+            <>
+              {messages.map((m) => {
+                const isMe =
+                  m.sender === user._id || m.sender?._id === user._id;
+                const showDeleted = m.isDeleted;
+                const timeStr = new Date(m.createdAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const isLastMyMessage = isMe && m._id === lastMyMessageId;
 
-              return (
-                <div
-                  key={m._id}
-                  className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-                >
-                  <div className="flex items-end gap-1 max-w-xs md:max-w-md">
-                    {!isMe && (
-                      <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[9px]">
-                        {selectedFriend?.name?.[0]}
-                      </div>
-                    )}
+                return (
+                  <div
+                    key={m._id}
+                    className={`flex ${
+                      isMe ? "justify-end" : "justify-start"
+                    }`}
+                  >
+                    <div className="flex items-end gap-1 max-w-xs md:max-w-md">
+                      {!isMe && (
+                        <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[9px]">
+                          {selectedFriend?.name?.[0]}
+                        </div>
+                      )}
 
-                    <div
-                      className={`px-3 py-2 rounded-2xl text-xs shadow-sm ${
-                        isMe
-                          ? "bg-emerald-600 text-white rounded-br-sm"
-                          : "bg-slate-800 text-slate-100 rounded-bl-sm"
-                      }`}
-                    >
                       <div
-                        className={
-                          showDeleted ? "italic text-slate-300/70" : ""
-                        }
+                        className={`px-3 py-2 rounded-2xl text-xs shadow-sm ${
+                          isMe
+                            ? "bg-emerald-600 text-white rounded-br-sm"
+                            : "bg-slate-800 text-slate-100 rounded-bl-sm"
+                        }`}
                       >
-                        {showDeleted ? "This message was deleted" : m.text}
+                        <div
+                          className={
+                            showDeleted ? "italic text-slate-300/70" : ""
+                          }
+                        >
+                          {showDeleted
+                            ? "This message was deleted"
+                            : m.text}
+                        </div>
+                        <div className="flex items-center gap-1 text-[9px] mt-1 text-slate-300/70">
+                          <span>{timeStr}</span>
+                          {isMe && isLastMyMessage && (
+                            <span>{m.seen ? "✓✓ seen" : "✓ sent"}</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1 text-[9px] mt-1 text-slate-300/70">
-                        <span>{timeStr}</span>
-                        {isMe && isLastMyMessage && (
-                          <span>{m.seen ? "✓✓ seen" : "✓ sent"}</span>
-                        )}
-                      </div>
-                    </div>
 
-                    {isMe && !showDeleted && (
-                      <button
-                        onClick={() => onDeleteMessage(m, true)}
-                        className="text-[9px] text-slate-500 hover:text-red-400"
-                        title="Delete for everyone"
-                      >
-                        del
-                      </button>
-                    )}
+                      {isMe && !showDeleted && (
+                        <button
+                          onClick={() => onDeleteMessage(m, true)}
+                          className="text-[9px] text-slate-500 hover:text-red-400"
+                          title="Delete for everyone"
+                        >
+                          del
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+
+              {/* 👇 yaha tak scroll karega */}
+              <div ref={messagesEndRef} />
+            </>
           )}
         </div>
 
