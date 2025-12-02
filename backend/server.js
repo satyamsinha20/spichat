@@ -17,79 +17,141 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// ✅ allowed origins list (dev + prod)
+// dev + prod origins
 const allowedOrigins = [
   process.env.CLIENT_URL,      // http://localhost:5173
   process.env.PROD_CLIENT_URL, // https://spichat.vercel.app
-].filter(Boolean); // undefined values hata do
+].filter(Boolean);
 
 console.log("Allowed origins:", allowedOrigins);
 
-// ✅ Socket.IO setup
+// ----------------- SOCKET.IO SETUP (multi-device) -----------------
+
+// userId -> Set<socketId>
+const onlineUsers = new Map();
+
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
-    credentials: true, // ⭐ important
   },
 });
 
-// online users map
-const onlineUsers = new Map();
+function getUserSockets(userId) {
+  return onlineUsers.get(userId) || new Set();
+}
 
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
+  // user online
   socket.on("user-online", (userId) => {
-    onlineUsers.set(userId, socket.id);
+    if (!userId) return;
+
+    const existing = onlineUsers.get(userId) || new Set();
+    existing.add(socket.id);
+    onlineUsers.set(userId, existing);
+
+    // sirf unique userIds bhejte hain
     io.emit("online-users", Array.from(onlineUsers.keys()));
   });
 
+  // send-message: receiver + sender ke saare sockets ko bhejo
   socket.on("send-message", (data) => {
-    const { receiverId } = data;
-    const receiverSocketId = onlineUsers.get(receiverId);
+    const { receiverId, senderId } = data;
+    if (!receiverId || !senderId) return;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("receive-message", data);
-    }
+    const receiverSockets = getUserSockets(receiverId);
+    const senderSockets = getUserSockets(senderId);
+
+    const targets = new Set([
+      ...receiverSockets,
+      ...senderSockets,
+    ]);
+
+    // jis socket ne message bheja usko dobara mat bhejo
+    targets.delete(socket.id);
+
+    targets.forEach((sockId) => {
+      io.to(sockId).emit("receive-message", data);
+    });
   });
 
+  // typing indicator (optional multi-device)
   socket.on("typing", (data) => {
-    const receiverSocketId = onlineUsers.get(data.to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("typing", data);
-    }
+    const { from, to } = data || {};
+    if (!to) return;
+
+    const receiverSockets = getUserSockets(to);
+
+    receiverSockets.forEach((sockId) => {
+      // sender ka current socket already type kar raha hai, usko mat bhejo
+      if (sockId === socket.id) return;
+      io.to(sockId).emit("typing", data);
+    });
   });
 
+  // messages-seen (both sides ke devices ko update)
   socket.on("messages-seen", (data) => {
-    const receiverSocketId = onlineUsers.get(data.to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messages-seen", data);
-    }
+    const { to, userId } = data || {};
+    if (!to) return;
+
+    const receiverSockets = getUserSockets(to);
+    const senderSockets = userId ? getUserSockets(userId) : new Set();
+
+    const targets = new Set([
+      ...receiverSockets,
+      ...senderSockets,
+    ]);
+
+    targets.forEach((sockId) => {
+      if (sockId === socket.id) return;
+      io.to(sockId).emit("messages-seen", data);
+    });
   });
 
+  // message-deleted
   socket.on("message-deleted", (data) => {
-    const receiverSocketId = onlineUsers.get(data.to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("message-deleted", data);
-    }
+    const { to, from } = data || {};
+    if (!to && !from) return;
+
+    const toSockets = to ? getUserSockets(to) : new Set();
+    const fromSockets = from ? getUserSockets(from) : new Set();
+
+    const targets = new Set([
+      ...toSockets,
+      ...fromSockets,
+    ]);
+
+    targets.forEach((sockId) => {
+      if (sockId === socket.id) return;
+      io.to(sockId).emit("message-deleted", data);
+    });
   });
 
   socket.on("disconnect", () => {
-    for (const [userId, sockId] of onlineUsers.entries()) {
-      if (sockId === socket.id) {
-        onlineUsers.delete(userId);
+    // iss socket ko saare users ke Set se remove karo
+    for (const [userId, sockets] of onlineUsers.entries()) {
+      if (sockets.has(socket.id)) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(userId);
+        } else {
+          onlineUsers.set(userId, sockets);
+        }
         break;
       }
     }
+
     io.emit("online-users", Array.from(onlineUsers.keys()));
     console.log("Client disconnected:", socket.id);
   });
 });
 
+// ----------------- REST API -----------------
+
 connectDB();
 
-// ✅ API CORS (same origins)
 app.use(
   cors({
     origin: allowedOrigins,
@@ -100,13 +162,11 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
-// routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/chats", chatRoutes);
 
-// optional health check
 app.get("/", (req, res) => {
   res.send("spichat backend running");
 });
